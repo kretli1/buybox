@@ -1,4 +1,4 @@
-<!-- INÍCIO DO CÓDIGO DA OFERTA -->
+<!-- INÍCIO DO CÓDIGO DA OFERTA - VERSÃO CORRIGIDA -->
 <style>
     /* Import a modern font from Google Fonts */
     @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&display=swap');
@@ -421,10 +421,15 @@
         'JP': { currency: 'JPY', symbol: '¥', locale: 'ja-JP' },
         'CN': { currency: 'CNY', symbol: '¥', locale: 'zh-CN' },
         'IN': { currency: 'INR', symbol: '₹', locale: 'en-IN' },
-        'ZA': { currency: 'ZAR', symbol: 'R', locale: 'en-ZA' }
+        'ZA': { currency: 'ZAR', symbol: 'R', locale: 'en-ZA' },
+        'PT': { currency: 'EUR', symbol: '€', locale: 'pt-PT' },
+        'ES': { currency: 'EUR', symbol: '€', locale: 'es-ES' },
+        'FR': { currency: 'EUR', symbol: '€', locale: 'fr-FR' },
+        'IT': { currency: 'EUR', symbol: '€', locale: 'it-IT' },
+        'DE': { currency: 'EUR', symbol: '€', locale: 'de-DE' }
     };
     
-    // Taxa de câmbio padrão (fallback)
+    // Taxa de câmbio padrão (atualizada)
     const DEFAULT_RATES = {
         'BRL': 5.2965,
         'EUR': 0.92,
@@ -442,17 +447,90 @@
     };
     
     // ========================================
-    // DETECTAR PAÍS DO USUÁRIO
+    // DETECTAR PAÍS DO USUÁRIO (MÚLTIPLOS MÉTODOS)
     // ========================================
     async function detectUserCountry() {
+        // Método 1: Timezone
         try {
-            const response = await fetch('https://ipapi.co/json/');
-            const data = await response.json();
-            return data.country_code || 'US';
-        } catch (error) {
-            console.warn('Could not detect country, using US as default');
-            return 'US';
+            const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+            const countryFromTZ = getCountryFromTimezone(timezone);
+            if (countryFromTZ) {
+                console.log('Country detected from timezone:', countryFromTZ);
+                return countryFromTZ;
+            }
+        } catch (e) {
+            console.warn('Timezone detection failed');
         }
+        
+        // Método 2: Locale do navegador
+        try {
+            const locale = navigator.language || navigator.userLanguage;
+            if (locale) {
+                const countryCode = locale.split('-')[1];
+                if (countryCode && CURRENCY_CONFIG[countryCode.toUpperCase()]) {
+                    console.log('Country detected from locale:', countryCode.toUpperCase());
+                    return countryCode.toUpperCase();
+                }
+            }
+        } catch (e) {
+            console.warn('Locale detection failed');
+        }
+        
+        // Método 3: API de Geolocalização (com timeout)
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 3000);
+            
+            const response = await fetch('https://ipapi.co/json/', {
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+            
+            if (response.ok) {
+                const data = await response.json();
+                if (data.country_code) {
+                    console.log('Country detected from IP API:', data.country_code);
+                    return data.country_code;
+                }
+            }
+        } catch (e) {
+            console.warn('IP API detection failed');
+        }
+        
+        // Fallback: US
+        console.log('Using default country: US');
+        return 'US';
+    }
+    
+    // Função auxiliar para detectar país pelo timezone
+    function getCountryFromTimezone(timezone) {
+        const tzCountryMap = {
+            'America/Sao_Paulo': 'BR',
+            'America/Fortaleza': 'BR',
+            'America/Manaus': 'BR',
+            'America/Recife': 'BR',
+            'America/New_York': 'US',
+            'America/Chicago': 'US',
+            'America/Los_Angeles': 'US',
+            'America/Denver': 'US',
+            'Europe/London': 'GB',
+            'Europe/Paris': 'FR',
+            'Europe/Berlin': 'DE',
+            'Europe/Madrid': 'ES',
+            'Europe/Rome': 'IT',
+            'Europe/Lisbon': 'PT',
+            'America/Mexico_City': 'MX',
+            'America/Buenos_Aires': 'AR',
+            'America/Santiago': 'CL',
+            'America/Bogota': 'CO',
+            'America/Toronto': 'CA',
+            'Australia/Sydney': 'AU',
+            'Asia/Tokyo': 'JP',
+            'Asia/Shanghai': 'CN',
+            'Asia/Kolkata': 'IN',
+            'Africa/Johannesburg': 'ZA'
+        };
+        return tzCountryMap[timezone] || null;
     }
     
     // ========================================
@@ -460,13 +538,23 @@
     // ========================================
     async function fetchExchangeRates() {
         try {
-            const response = await fetch('https://api.exchangerate-api.com/v4/latest/USD');
-            const data = await response.json();
-            return data.rates;
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 3000);
+            
+            const response = await fetch('https://api.exchangerate-api.com/v4/latest/USD', {
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+            
+            if (response.ok) {
+                const data = await response.json();
+                console.log('Exchange rates fetched successfully');
+                return data.rates;
+            }
         } catch (error) {
             console.warn('Using offline exchange rates');
-            return DEFAULT_RATES;
         }
+        return DEFAULT_RATES;
     }
     
     // ========================================
@@ -475,7 +563,7 @@
     function formatPrice(value, countryCode) {
         const config = CURRENCY_CONFIG[countryCode] || CURRENCY_CONFIG['US'];
         
-        // Para moedas sem centavos (JPY, por exemplo)
+        // Para moedas sem centavos (JPY, CLP, etc)
         const decimals = ['JPY', 'CLP'].includes(config.currency) ? 0 : 2;
         
         return value.toLocaleString(config.locale, {
@@ -488,51 +576,65 @@
     // ATUALIZAR TODOS OS PREÇOS NA PÁGINA
     // ========================================
     async function updateAllPrices() {
-        // Detectar país e buscar taxas
-        const countryCode = await detectUserCountry();
-        const rates = await fetchExchangeRates();
-        
-        // Configuração da moeda
-        const config = CURRENCY_CONFIG[countryCode] || CURRENCY_CONFIG['US'];
-        const symbol = config.symbol;
-        const currency = config.currency;
-        
-        // Calcular preços
-        let valorLocal;
-        if (currency === 'USD') {
-            valorLocal = VALOR_USD;
-        } else {
-            const rate = rates[currency] || DEFAULT_RATES[currency] || 1;
-            valorLocal = VALOR_USD * rate;
+        try {
+            // Detectar país e buscar taxas
+            const countryCode = await detectUserCountry();
+            const rates = await fetchExchangeRates();
+            
+            // Configuração da moeda
+            const config = CURRENCY_CONFIG[countryCode] || CURRENCY_CONFIG['US'];
+            const symbol = config.symbol;
+            const currency = config.currency;
+            
+            // Calcular preços
+            let valorLocal;
+            if (currency === 'USD') {
+                valorLocal = VALOR_USD;
+            } else {
+                const rate = rates[currency] || DEFAULT_RATES[currency] || 1;
+                valorLocal = VALOR_USD * rate;
+            }
+            
+            const valorOriginal = valorLocal * 2.4; // 140% a mais (preço riscado)
+            
+            // Atualizar elementos na página
+            const priceOldElements = document.querySelectorAll('#priceOld, #ctaPriceOld');
+            priceOldElements.forEach(el => {
+                el.textContent = `${symbol} ${formatPrice(valorOriginal, countryCode)}`;
+            });
+            
+            const priceNewElements = document.querySelectorAll('#priceNew, #ctaPriceNew');
+            priceNewElements.forEach(el => {
+                el.textContent = `${symbol} ${formatPrice(valorLocal, countryCode)}`;
+            });
+            
+            // Atualizar subtítulo com preço em dólares
+            const subtitleElement = document.getElementById('priceSubtitle');
+            if (subtitleElement) {
+                subtitleElement.textContent = `$ ${VALOR_USD.toFixed(2)} in US dollars`;
+            }
+            
+            console.log(`✅ Prices updated for ${countryCode} - ${currency}`);
+            console.log(`Local price: ${symbol} ${formatPrice(valorLocal, countryCode)}`);
+        } catch (error) {
+            console.error('Error updating prices:', error);
+            // Em caso de erro, mostrar valores em USD
+            document.querySelectorAll('#priceOld, #ctaPriceOld').forEach(el => {
+                el.textContent = `$ ${(VALOR_USD * 2.4).toFixed(2)}`;
+            });
+            document.querySelectorAll('#priceNew, #ctaPriceNew').forEach(el => {
+                el.textContent = `$ ${VALOR_USD.toFixed(2)}`;
+            });
         }
-        
-        const valorOriginal = valorLocal * 2.4; // 140% a mais (preço riscado)
-        
-        // Atualizar elementos na página
-        const priceOldElements = document.querySelectorAll('#priceOld, #ctaPriceOld');
-        priceOldElements.forEach(el => {
-            el.textContent = `${symbol} ${formatPrice(valorOriginal, countryCode)}`;
-        });
-        
-        const priceNewElements = document.querySelectorAll('#priceNew, #ctaPriceNew');
-        priceNewElements.forEach(el => {
-            el.textContent = `${symbol} ${formatPrice(valorLocal, countryCode)}`;
-        });
-        
-        // Atualizar subtítulo com preço em dólares
-        const subtitleElement = document.getElementById('priceSubtitle');
-        if (subtitleElement) {
-            subtitleElement.textContent = `$ ${VALOR_USD.toFixed(2)} in US dollars`;
-        }
-        
-        console.log(`Prices updated for ${countryCode} - ${currency}`);
     }
     
     // ========================================
     // INICIALIZAÇÃO
     // ========================================
-    window.addEventListener('load', function() {
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', updateAllPrices);
+    } else {
         updateAllPrices();
-    });
+    }
 </script>
-<!-- FIM DO CÓDIGO DA OFERTA -->
+<!-- FIM DO CÓDIGO DA OFERTA - VERSÃO CORRIGIDA -->
